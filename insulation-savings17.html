@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Insulation Jacket Savings — Side-by-Side with Currency & Projection</title>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 20px; max-width: 1200px; margin: auto; }
+    h1 { grid-column: 1 / span 2; color: #003366; }
+    .box { background: #fafafa; padding: 20px; border: 1px solid #ddd; border-radius: 4px; }
+    .results { background: #e0f7fa; padding: 15px; margin-top: 15px; border: 2px solid #00acc1; border-radius: 4px; }
+    label { display: block; margin-top: 1em; font-weight: bold; }
+    select, input, button { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 1em; background: #005a9c; color: #fff; border: none; cursor: pointer; }
+    button:hover { background: #004a7c; }
+    .formula { background: #eef; padding: 10px; margin: 10px 0; border-left: 4px solid #005a9c; }
+    #results p { margin: 0.5em 0; font-weight: bold; }
+    #chartContainer { margin-top: 20px; }
+    #savingsChart { width: 100% !important; max-height: 200px; }
+    .footer { grid-column: 1 / span 2; margin-top: 20px; font-size: 0.9em; text-align: center; }
+    .footer a { color: #005a9c; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="grid">
+    <h1>Insulation Jacket Savings Calculator</h1>
+
+    <!-- Left: Inputs & Results -->
+    <div class="box">
+      <h2>Inputs</h2>
+      <label for="size">Valve Size (DN)</label>
+      <select id="size">
+        <option value="15">DN15</option>
+        <option value="25" selected>DN25</option>
+        <option value="32">DN32</option>
+        <option value="50">DN50</option>
+        <option value="80">DN80</option>
+        <option value="100">DN100</option>
+        <option value="125">DN125</option>
+      </select>
+
+      <label for="pressure">Steam Pressure (barg)</label>
+      <select id="pressure"></select>
+
+      <label for="tHot">Operating Temperature, \(T_{\mathrm{hot}}\) (°C)</label>
+      <input id="tHot" type="number">
+
+      <label for="tAmb">Ambient Temperature, \(T_{\mathrm{amb}}\) (°C)</label>
+      <input id="tAmb" type="number" value="20">
+
+      <label>Annual Run Time, \(t\) (fixed)</label>
+      <input type="text" value="8760 h/yr" readonly>
+
+      <label for="eff">Boiler Efficiency, \(\varepsilon\) (0–1)</label>
+      <input id="eff" type="number" step="0.01" min="0" max="1" value="0.80">
+
+      <label for="cost">Energy Cost, \(C\) (€/kWh)</label>
+      <input id="cost" type="number" step="0.01" value="0.05">
+
+      <label for="currency">Display Currency:</label>
+      <select id="currency">
+        <option value="EUR" selected>€ Euro</option>
+        <option value="GBP">£ Pound Sterling</option>
+        <option value="DKK">kr Danish</option>
+        <option value="SEK">kr Swedish</option>
+        <option value="NOK">kr Norwegian</option>
+      </select>
+
+      <button id="calc">Calculate Savings</button>
+
+      <div id="results" class="results"></div>
+    </div>
+
+    <!-- Right: Formulas & Projection -->
+    <div class="box">
+      <h2>Formulas</h2>
+      <div class="formula">$$A = \pi\,(D_v + D_f)\,L$$</div>
+      <div class="formula">$$\dot Q_{\rm valve} = U\,A\,\Delta T$$</div>
+      <div class="formula">$$Q_{\rm steam} = \frac{\dot Q_{\rm valve}\,t}{1000}$$</div>
+      <div class="formula">$$Q_{\rm fuel} = \frac{Q_{\rm steam}}{\varepsilon}$$</div>
+      <div class="formula">$$Q_{\rm saved} = Q_{\rm fuel}\,\eta$$</div>
+      <div class="formula">$$\text{Cost Saved} = Q_{\rm saved}\,C_{\text{local}}$$</div>
+
+      <div id="chartContainer">
+        <h3>5-Year Savings Projection</h3>
+        <canvas id="savingsChart"></canvas>
+      </div>
+    </div>
+
+    <div class="footer">
+      Thank you for using our insulation jacket calculator!<br>
+      For more information about our audit program, please visit our page
+      <a href="https://www.spiraxsarco.com/global/en-GB/advance/audit-and-advisory" target="_blank">here</a>.
+    </div>
+  </div>
+
+  <script>
+    const satTable = {0.5:111.4,1:120.2,2:133.5,3:143.6,4:152.4,5:160.0,6:166.7,7:170.5,8:175.5,9:179.9,10:184.0,11:187.8,12:191.2,13:194.4,14:197.3,15:199.9,16:202.3,17:204.5,18:206.7,19:208.8,20:210.9,21:213.0,22:214.9,23:216.9,24:218.8,25:220.6,26:222.4,27:224.1,28:225.9,29:227.6,30:229.3};
+    const faceToFace = {15:3.08,25:3.41,32:3.36,50:3.08,80:2.83,100:2.48,125:2.88};
+    const U = 8, η = 0.80, t = 8760;
+    const rates = { EUR:1, GBP:0.86, DKK:7.45, SEK:11.0, NOK:10.0 };
+
+    // populate pressure
+    const pSel = document.getElementById('pressure');
+    pSel.innerHTML = '<option value="0.5">0.5 barg</option>';
+    for(let i=1;i<=30;i++) pSel.innerHTML += `<option value="${i}">${i} barg</option>`;
+    pSel.onchange = () => document.getElementById('tHot').value = satTable[pSel.value];
+    pSel.value="3"; pSel.onchange();
+
+    // initialize Chart.js
+    const ctx = document.getElementById('savingsChart').getContext('2d');
+    const savingsChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: ['Year 1','Year 2','Year 3','Year 4','Year 5'],
+        datasets: [{
+          label: 'Cumulative Savings',
+          data: [0,0,0,0,0],
+          borderColor: '#005a9c',
+          backgroundColor: 'rgba(0,90,156,0.2)',
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: { title: { display: true, text: 'Year' } },
+          y: { beginAtZero: true, title: { display: true, text: 'Cost Saved' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    document.getElementById('calc').onclick = () => {
+      const dn   = +document.getElementById('size').value;
+      const Th   = +document.getElementById('tHot').value;
+      const Ta   = +document.getElementById('tAmb').value;
+      const ε    = +document.getElementById('eff').value;
+      const C_e  = +document.getElementById('cost').value;
+      const curr = document.getElementById('currency').value;
+      if(Th<=Ta||ε<=0||ε>1||C_e<=0) {
+        return alert('Check inputs: T_hot > T_amb, 0 < ε ≤ 1, cost > 0.');
+      }
+
+      const L    = faceToFace[dn], Dn = dn/1000;
+      const A    = Math.PI*(1.5*Dn + 1.3*Dn)*L;
+      const dT   = Th - Ta;
+      const Qv   = U * A * dT;
+      const Qs   = Qv * t / 1000;
+      const Qf   = Qs / ε;
+      const Qs2  = Qf * η;
+      const localCost    = C_e * rates[curr];
+      const annualSaving = Qs2 * localCost;
+
+      // render results
+      document.getElementById('results').innerHTML = `
+        <p><strong>Surface area (A):</strong> ${A.toFixed(2)} m²</p>
+        <p><strong>Valve heat-loss:</strong> ${Qv.toFixed(0)} W</p>
+        <p><strong>Steam heat/yr:</strong> ${Qs.toFixed(0)} kWh/yr</p>
+        <p><strong>Fuel req’d/yr:</strong> ${Qf.toFixed(0)} kWh/yr</p>
+        <p><strong>Energy Saved:</strong> ${Qs2.toFixed(0)} kWh/yr</p>
+        <p><strong>Cost Savings:</strong> ${curr==='EUR'?'€': curr==='GBP'?'£': 'kr'}${annualSaving.toFixed(2)}/yr</p>
+      `;
+
+      // update 5-year projection
+      let cum = 0;
+      const cumData = [1,2,3,4,5].map(() => (cum += annualSaving).toFixed(2));
+      savingsChart.data.datasets[0].data = cumData;
+      savingsChart.update();
+    };
+  </script>
+</body>
+</html>
